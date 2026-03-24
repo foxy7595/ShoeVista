@@ -1,42 +1,16 @@
-import React, { useEffect, useState } from 'react'
-import axios from 'axios'
+import React from 'react';
 import Products from '../components/Products';
+import { useProductsByCategory } from '../hooks';
 
 const Women = () => {
-    const [products, setProducts] = useState([]);
-    const [error, setError] = useState(null);
-    const [loading, setLoading] = useState(true);
+  const { data: products = [], error, isLoading } = useProductsByCategory('women');
+  const sortedProducts = [...products].sort((a, b) => parseInt(b.reviews) - parseInt(a.reviews));
 
-    useEffect(() => {
-        let isMounted = true;
-        const fetchData = async () => {
-            try {
-                const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/api/category/women`);
-                if (isMounted) {
-                    const sorted = res.data.sort((a, b) => parseInt(b.reviews) - parseInt(a.reviews))
-                    setProducts(sorted);
-                    setLoading(false);
-                }
-            } catch (err) {
-                if (isMounted) {
-                    console.error(`Error while fetching products: ${err.message}`);
-                    setError(err);
-                    setLoading(false);
-                }
+  return (
+    <>
+      <Products loading={isLoading} error={error} products={sortedProducts} />
+    </>
+  );
+};
 
-            }
-        }
-        fetchData();
-        return () => {
-            isMounted = false;
-        }
-    }, [])
-    return (
-        <>
-           
-            <Products loading={loading} error={error} products={products} />
-        </>
-    )
-}
-
-export default Women
+export default Women;
