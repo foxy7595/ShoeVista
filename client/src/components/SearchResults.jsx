@@ -1,51 +1,27 @@
-import axios from 'axios';
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { Error, Loading } from './Loading';
 import Products from './Products';
+import { useProductSearch } from '../hooks';
 
 const SearchResults = () => {
-    const [products, setProducts] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+  const { search } = useParams();
+  const { data: products = [], error, isLoading } = useProductSearch(search);
 
-    const { search } = useParams();
+  const filteredProducts = useMemo(() => {
+    if (search.includes('women')) {
+      return products.filter(elem => elem.category === 'women');
+    }
+    return products.slice(0, 50);
+  }, [products, search]);
 
-    useEffect(() => {
-        let isMounted = true;
-        const fetchData = async () => {
-            try {
-                const res = await axios.get(`${import.meta.env.VITE_BASE_URL}/api/products/search?q=${encodeURIComponent(search)}`);
-                if (isMounted) {
-                    if (search.includes('women')) {
-                        const data = res.data.filter(elem => elem.category === 'women');
-                        setProducts(data);
-                    } else {
-                        setProducts(res.data.slice(0, 50));
-                    }
-                    setLoading(false);
-                }
-            } catch (err) {
-                if (isMounted) {
-                    console.error('Error while searching:', err.message);
-                    setLoading(false);
-                    setError(err);
-                }
-            }
-        };
-        fetchData();
-        return () => {
-            isMounted = false;
-        };
-    }, [search]);
-
-    return (
-        <>
-            {loading && <Loading />}
-            {error && <Error error={error} />}
-            <Products products={products} error={error} loading={loading} />
-        </>
-    );
+  return (
+    <>
+      {isLoading && <Loading />}
+      {error && <Error error={error} />}
+      <Products products={filteredProducts} error={error} loading={isLoading} />
+    </>
+  );
 };
 
 export default SearchResults;
