@@ -1,244 +1,217 @@
 import Products from "../models/productModel.js";
+import { asyncHandler } from "../middleware/errorHandler.js";
+import { cacheHeaders } from "../middleware/cacheHeaders.js";
+import { getPagination, paginateResponse } from "../utils/pagination.js";
+import { buildProductFilter, findProducts } from "../utils/queryBuilder.js";
+import { normalizeCategory, PRODUCT_PROJECTION } from "../utils/validators.js";
 
-//Get all products 
-export const getProducts = async (req, res) => {
-    try {
-        const products = await Products.find();
-        res.status(200).json(products);
-    } catch (error) {
-        console.error(`Error while fetching products: ${error.message}`);
-        res.status(500).json({ message: error.message });
+//Get all products with optional pagination
+export const getProducts = asyncHandler(async (req, res) => {
+    const { page, limit = 50 } = req.query;
+
+    // If no page parameter, return all products (backward compatibility)
+    if (!page) {
+        const products = await Products.find().select(PRODUCT_PROJECTION).lean();
+        return res.status(200).json(products);
     }
-}
+
+    const { skip, limit: limitNum, page: pageNum } = getPagination(page, limit);
+
+    const [products, total] = await Promise.all([
+        Products.find().select(PRODUCT_PROJECTION).skip(skip).limit(limitNum).lean(),
+        Products.countDocuments()
+    ]);
+
+    res.status(200).json(paginateResponse(products, pageNum, limitNum, total));
+});
 
 //Get single product by id
-export const getProduct = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const product = await Products.findById(id);
-        if (!product) {
-            return res.status(400).json({ message: "Product doesn't exist." })
-        }
-        res.status(200).json(product);
-    } catch (error) {
-        console.error(`Error while fetching product: ${error.message}`);
-        res.status(500).json({ message: error.message });
+export const getProduct = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const product = await Products.findById(id).lean();
+
+    if (!product) {
+        return res.status(404).json({ message: "Product doesn't exist." });
     }
-}
+
+    res.status(200).json(product);
+});
 
 //Add a product
-export const addProduct = async (req, res) => {
-    try {
-        const { img, brand, title, rating, reviews, sellPrice, orders, mrp, discount } = req.body;
+export const addProduct = asyncHandler(async (req, res) => {
+    const { img, brand, title, rating, reviews, sellPrice, orders, mrp, discount, category } = req.body;
 
-        const newProduct = await Products.create({ img, brand, title, rating, reviews, sellPrice, orders, mrp, discount });
-        return res.status(201).json({ message: "Product created successfully", product: newProduct });
-    } catch (error) {
-        console.error(`Error while adding product: ${error.message}`);
-        res.status(500).json({ message: error.message });
+    // Input validation
+    if (!img || !brand || !title || !category) {
+        return res.status(400).json({ message: "Missing required fields: img, brand, title, category" });
     }
-}
+
+    if (typeof sellPrice !== 'number' || sellPrice <= 0) {
+        return res.status(400).json({ message: "sellPrice must be a positive number" });
+    }
+
+    if (rating && (rating < 0 || rating > 5)) {
+        return res.status(400).json({ message: "rating must be between 0 and 5" });
+    }
+
+    if (reviews && reviews < 0) {
+        return res.status(400).json({ message: "reviews cannot be negative" });
+    }
+
+    if (mrp && typeof mrp !== 'number') {
+        return res.status(400).json({ message: "mrp must be a number" });
+    }
+
+    if (discount && (discount < 0 || discount > 100)) {
+        return res.status(400).json({ message: "discount must be between 0 and 100" });
+    }
+
+    const newProduct = await Products.create({
+        img, brand, title, rating, reviews, sellPrice, orders, mrp, discount, category
+    });
+
+    res.status(201).json({ message: "Product created successfully", product: newProduct });
+});
 
 //Get products by Category
-export const getByCategory = async (req, res) => {
+export const getByCategory = asyncHandler(async (req, res) => {
     const { category } = req.params;
-    try {
-        const products = await Products.find({ category: category });
-        res.status(200).json(products);
+    const { page, limit = 50 } = req.query;
+    const dbCategory = normalizeCategory(category);
 
-    } catch (error) {
-        console.error('Error fetching products:', error.message);
-        res.status(500).send('Internal Server Error');
+    // If no page parameter, return all products (backward compatibility)
+    if (!page) {
+        const products = await Products.find({ category: dbCategory })
+            .select(PRODUCT_PROJECTION)
+            .lean();
+        return res.status(200).json(products);
     }
-}
 
-//Get top rated 
-export const getTopRated = async (req, res) => {
-    try {
-        const topRatedShoes = await Products.find()
-            .sort({ rating: -1 })
-            .limit(12);
-        return res.status(200).json(topRatedShoes);
-    } catch (err) {
-        console.error('Error fetching top-rated shoes:', err);
-        res.status(500).send('Internal Server Error');
-    }
-}
+    const { skip, limit: limitNum, page: pageNum } = getPagination(page, limit);
+
+    const [products, total] = await Promise.all([
+        Products.find({ category: dbCategory })
+            .select(PRODUCT_PROJECTION)
+            .skip(skip)
+            .limit(limitNum)
+            .lean(),
+        Products.countDocuments({ category: dbCategory })
+    ]);
+
+    res.status(200).json(paginateResponse(products, pageNum, limitNum, total));
+});
+
+//Get top rated
+export const getTopRated = asyncHandler(async (req, res) => {
+    const { limit = 12 } = req.query;
+
+    const topRatedShoes = await Products.find()
+        .select(PRODUCT_PROJECTION)
+        .sort({ rating: -1 })
+        .limit(parseInt(limit))
+        .lean();
+
+    res.status(200).json(topRatedShoes);
+});
 
 //Get best Sellers
-export const getBestSellers = async (req, res) => {
-    try {
-        const products = await Products.find()
-            .sort({ reviews: -1 })
-            .limit(12);
+export const getBestSellers = asyncHandler(async (req, res) => {
+    const { limit = 12 } = req.query;
 
-        return res.status(200).json(products);
-    } catch (err) {
-        console.error('Error fetching top-rated shoes:', err.message);
-        res.status(500).send('Internal Server Error');
+    const products = await Products.find()
+        .select(PRODUCT_PROJECTION)
+        .sort({ reviews: -1 })
+        .limit(parseInt(limit))
+        .lean();
+
+    res.status(200).json(products);
+});
+
+//Get search results with optimized search
+export const searchProducts = asyncHandler(async (req, res) => {
+    let query = req.query.q ? req.query.q.trim() : '';
+
+    if (query.length === 0) {
+        return res.status(400).json({ message: "Empty search field" });
     }
-}
 
-//Get search results
-export const searchProducts = async (req, res) => {
-    try {
-        let query = req.query.q ? req.query.q.trim() : '';
-        if (query.length === 0) {
-            return res.status(400).json({ message: "Empty search field" });
-        }
-        if (query.includes('sneakers')) {
-            query = query.replace('sneakers', 'sneaker');
-        }
+    // Normalize search terms
+    query = query
+        .replace('sneakers', 'sneaker')
+        .replace(/kids|boys|girls/gi, "child")
+        .replace(/mens/gi, "men")
+        .replace(/womens/gi, "women")
+        .replace(/\b(shoe|shoes)\b/gi, ' ')
+        .replace(/'/g, '')
+        .trim();
 
-        // Normalize specific keywords
-        query = query.replace(/kids|boys|girls/gi, "child");
-        query = query.replace(/mens/gi, "men");
-        query = query.replace(/womens/gi, "women");
-        query = query.replace(/\b(shoe|shoes)\b/gi, ' ').trim();
+    const terms = query.split(/\s+/).filter(Boolean);
 
-        // Remove special characters (e.g., apostrophes)
-        query = query.replace(/'/g, '');
-        // Normalize query terms
-        const terms = query.split(/\s+/);
-        // Build the search query
-        const searchQuery = {
+    // Use text search index for better performance
+    let results;
+    if (terms.length === 1) {
+        results = await Products.find({
             $or: [
-                ...terms.map(term => ({
-                    $or: [
-                        { title: { $regex: term, $options: "i" } },
-                        { brand: { $regex: term, $options: "i" } },
-                        { category: { $in: term } }
-                    ]
-                }))
+                { title: { $regex: terms[0], $options: "i" } },
+                { brand: { $regex: terms[0], $options: "i" } },
+                { category: { $regex: terms[0], $options: "i" } }
             ]
-        };
-
-        const results = await Products.find(searchQuery);
-
-        // Send response
-        res.json(results);
-    } catch (error) {
-        console.error('Error performing search:', error.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        }).select(PRODUCT_PROJECTION).lean();
+    } else {
+        // Use text search for multiple terms
+        results = await Products.find({
+            $text: { $search: query }
+        }).select(PRODUCT_PROJECTION).lean();
     }
-};
 
-//Sort products
-// export const sortProducts = async (req, res) => {
-//     try {
-//         const { category, criteria, order } = req.params;
-//         const orderby = parseInt(order);
+    res.json(results);
+});
 
-//         const result = await Products.find({ category: category })
-//             .sort({ [criteria]: orderby })
+//Filter products with refactored filter builder
+export const filterProducts = asyncHandler(async (req, res) => {
+    const filter = buildProductFilter(req.query);
 
-//         if (!result) {
-//             return res.status(400).json(`Product not found.`)
-//         }
-//         res.status(200).json(result);
+    const result = await findProducts(filter, {
+        projection: PRODUCT_PROJECTION
+    });
 
-
-//     } catch (error) {
-//         console.error('Error while sorting:', error.message);
-//         res.status(500).send('Internal Server Error');
-//     }
-// }
-
-export const filterProducts = async (req, res) => {
-    try {
-        // Destructure filter parameters from the query string
-        const { brand, rating, category, price, discount } = req.query;
-
-        // Log the query parameters for debugging
-        // console.log('Query Parameters:', req.query);
-
-        // Build a filter object based on provided parameters
-        const filter = {};
-
-        // Process brand
-        if (brand) filter.brand = new RegExp(brand, 'i');
-
-        // Process rating
-        if (rating) {
-            const ratingValue = parseFloat(rating);
-            if (!isNaN(ratingValue) && ratingValue >= 1 && ratingValue <= 5) {
-                filter.rating = { $gte: ratingValue };
-            }
-        }
-
-        // Process category
-        if (category) {
-            if (category === "Unisex") {
-                filter.category = "adult";
-            } if (category === "Kids") {
-                filter.category = "child"
-            } else {
-                filter.category = category.toLowerCase();
-            }
-        }
-
-        // Process price range
-        let priceRange = {};
-        if (price) {
-            const priceRangeMatch = price.match(/₹(\d+)-₹(\d+)/);
-            if (priceRangeMatch) {
-                const minPrice = parseFloat(priceRangeMatch[1].replace(',', ''));
-                const maxPrice = parseFloat(priceRangeMatch[2].replace(',', ''));
-                priceRange = { $gte: minPrice, $lte: maxPrice };
-            } else if (price === "₹3000+") {
-                priceRange = { $gte: 3000 };
-            }
-            filter.sellPrice = priceRange;
-        }
-
-        // Process discount
-        if (discount) {
-            const discountMatch = discount.match(/(\d+)%/);
-            if (discountMatch) {
-                const discountValue = parseInt(discountMatch[1], 10);
-                filter.discount = { $gte: discountValue };
-            }
-        }
-
-        // Query the database with the constructed filter
-        const result = await Products.find(filter);
-
-        // Check if any products were found
-        if (result.length === 0) {
-            return res.status(404).json({ message: 'No products found matching the criteria.' });
-        }
-        return res.status(200).json(result);
-
-    } catch (error) {
-        console.error('Error while filtering products:', error.message);
-        res.status(500).send('Internal Server Error');
+    if (result.length === 0) {
+        return res.status(404).json({ message: 'No products found matching the criteria.' });
     }
-}
 
-export const listOfProducts = async (req, res) => {
-    try {
-        const { list } = req.params;
+    res.status(200).json(result);
+});
 
-        // Convert comma-separated string to array of IDs
-        const idArray = list.split(',').map(id => id.trim());
+//Get list of products by IDs
+export const listOfProducts = asyncHandler(async (req, res) => {
+    const { list } = req.params;
 
-        // Check if the array of IDs is empty
-        if (idArray.length === 0) {
-            return res.status(200).json({ message: "No product IDs provided" });
-        }
-
-        // Fetch products from the database
-        const result = await Products.find({ _id: { $in: idArray } });
-
-        // Check if any products were found
-        if (result.length === 0) {
-            return res.status(200).json({ message: "Products not found" });
-        }
-
-        // Send response with products
-        res.status(200).json(result);
-    } catch (error) {
-        console.error('Error while fetching products:', error.message);
-        res.status(500).send('Internal Server Error');
+    if (!list) {
+        return res.status(400).json({ message: "No product IDs provided" });
     }
-}
+
+    const idArray = list.split(',').map(id => id.trim()).filter(Boolean);
+
+    if (idArray.length === 0) {
+        return res.status(400).json({ message: "No valid product IDs provided" });
+    }
+
+    const result = await Products.find({ _id: { $in: idArray } })
+        .select(PRODUCT_PROJECTION)
+        .lean();
+
+    res.status(200).json(result);
+});
+
+// Get products by brand (new endpoint for BestSellers component)
+export const getByBrand = asyncHandler(async (req, res) => {
+    const { brand } = req.params;
+    const { limit = 6 } = req.query;
+
+    const products = await Products.find({ brand: new RegExp(brand, 'i') })
+        .select(PRODUCT_PROJECTION)
+        .limit(parseInt(limit))
+        .lean();
+
+    res.status(200).json(products);
+});

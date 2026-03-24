@@ -46,6 +46,13 @@ const productSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Indexes for better query performance
+productSchema.index({ brand: 1 });
+productSchema.index({ category: 1 });
+productSchema.index({ rating: -1 });
+productSchema.index({ brand: 1, category: 1 });
+productSchema.index({ title: 'text', brand: 'text' }); // For search functionality
+
 const Products = mongoose.model("Product", productSchema);
 
 export default Products;

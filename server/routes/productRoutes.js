@@ -3,6 +3,7 @@ import {
     addProduct,
     filterProducts,
     getBestSellers,
+    getByBrand,
     getByCategory,
     getProduct,
     getProducts,
@@ -30,7 +31,18 @@ router.get('/category/:category', getByCategory);
 router.get('/filter/topRated', getTopRated);
 
 //Route to get best sellers
-router.get('/filter/bestSellers', getBestSellers)
+router.get('/filter/bestSellers', getBestSellers);
+
+//Route to filter by type (topRated, bestSellers, etc)
+router.get('/filter/:type', async (req, res) => {
+    const { type } = req.params;
+    if (type === 'topRated') {
+        return getTopRated(req, res);
+    } else if (type === 'bestSellers') {
+        return getBestSellers(req, res);
+    }
+    return res.status(400).json({ message: 'Invalid filter type' });
+});
 
 //Route to search for an item
 router.get('/products/search', searchProducts)
@@ -43,6 +55,9 @@ router.get('/products/filterBy', filterProducts)
 
 //Route to get list of products
 router.get('/products/:list', listOfProducts)
+
+//Route to get products by brand
+router.get('/brand/:brand', getByBrand)
 
 
 export default router;
